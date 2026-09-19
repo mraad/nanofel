@@ -1,0 +1,8 @@
+.DS_Store
+__pycache__/
+*.pyc
+*.bin
+*.pt
+.venv/
+out-nanofel*/
+data/nanofel/extra.jsonl
