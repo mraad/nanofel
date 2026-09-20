@@ -7,16 +7,12 @@ parseable gold clause is a fixed point):
     (a) and (b)                              no subtype: every AND operand wrapped
     col = 'x' or col = 'y'                   same-column OR is one bare value set
     (a) or (b)                               different-column OR: operands wrapped
-    LIKE -> ILIKE                            on the 11 columns the OKF hints name
 
 Clauses with BETWEEN are rare in both sets and are left to the caller to drop.
 """
 import re
 import sys
 
-ILIKE_COLS = {"discovery_name", "discovery_wellbore_name", "drilling_facility", "drilling_operator",
-              "included_in_discovery_name", "main_grouping", "medium", "pipe_name", "production_licence",
-              "well_name", "wellbore_name"}
 SUBTYPE = re.compile(r"^(?:discovery_type|content_type|PipelinesType) = cast\(")
 ATOM = re.compile(r"(\w+) (=|<>|>=|<=|>|<|ILIKE|LIKE) (cast\([^)]*\)|timestamp '[^']*'|'(?:[^']|'')*'|-?[\d.]+)")
 TOK = re.compile(r"\(|\)|\band\b|\bor\b|\bAND\b|" + ATOM.pattern)  # uppercase AND = date-range pair, kept verbatim
@@ -87,8 +83,6 @@ def flatten(node):
 
 def atom_str(a):
     _, col, op, val = a
-    if op == "LIKE" and col in ILIKE_COLS:
-        op = "ILIKE"
     return f"{col} {op} {val}"
 
 

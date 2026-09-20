@@ -12,10 +12,10 @@ init_from = 'gpt2-medium'
 
 always_save_checkpoint = False  # keep best val loss only
 
-# ~1.6M train tokens with extra.jsonl; block 256 covers the longest pair with room
+# 474k train tokens gold only, 1.37M with extra.jsonl; block 256 covers the longest pair (199 tokens) with room
 block_size = 256
 batch_size = 16
-gradient_accumulation_steps = 2  # 2 GPUs -> 1 each; 32 seqs * 256 = 8k tok / iter
+gradient_accumulation_steps = 2  # 2 GPUs -> 1 each, 1 GPU -> both; 32 seqs * 256 = 8k tok / iter
 
 max_iters = 3000
 lr_decay_iters = 3000

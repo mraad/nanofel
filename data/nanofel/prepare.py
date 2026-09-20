@@ -4,13 +4,15 @@ Each record has `text` and `source_text` (two phrasings) that map to one `meta`.
 Both phrasings become training pairs; the split is by record so no meta leaks
 into validation. If `extra.jsonl` exists next to this file (generated
 `{text, meta}` lines), it is normalized to gold style and added to train only,
-minus any record whose meta appears in the gold validation split. Format per pair:
+minus BETWEEN clauses, any record whose meta appears in the gold validation
+split, and any record filtering on a (layer, column) gold never uses. Format per pair:
 
     Q: <question>\nA: <compact json meta><|endoftext|>
 """
 import json
 import os
 import random
+import re
 import sys
 
 import numpy as np
@@ -21,6 +23,7 @@ from normalize import normalize, Unparseable  # noqa: E402
 
 HERE = os.path.dirname(__file__)
 VAL_FRAC = 0.1
+COL = re.compile(r"(\w+) (?:=|<>|>=|<=|>|<|LIKE|ILIKE|BETWEEN)")
 
 
 def fmt(question, meta=None):
@@ -40,11 +43,14 @@ if __name__ == "__main__":
     extra_path = os.path.join(HERE, "extra.jsonl")
     if os.path.exists(extra_path):
         val_metas = {json.dumps(r["meta"], sort_keys=True) for r in val}
+        gold_cols = {(l, c) for r in recs for l, w in zip(r["meta"]["layers"], r["meta"]["where"]) for c in COL.findall(w)}
         kept = dropped = 0
         for line in open(extra_path, encoding="utf-8"):
             r = json.loads(line)
-            if json.dumps(r["meta"], sort_keys=True) in val_metas or any("BETWEEN" in w for w in r["meta"]["where"]):
-                dropped += 1; continue
+            m = r["meta"]
+            if (json.dumps(m, sort_keys=True) in val_metas or any("BETWEEN" in w for w in m["where"])
+                    or any((l, c) not in gold_cols for l, w in zip(m["layers"], m["where"]) for c in COL.findall(w))):
+                dropped += 1; continue  # column the catalog no longer has (e.g. medium, paly_slides) shows up as absent from gold
             try:
                 r["meta"]["where"] = [normalize(w) for w in r["meta"]["where"]]
             except Unparseable:
