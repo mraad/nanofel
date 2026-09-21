@@ -47,9 +47,9 @@ cd ~/nanofel
 uv venv --python 3.12 .venv && uv pip install -r requirements.txt   # torch cu130 works on Blackwell
 # optional: drop generated {text, meta} lines into data/nanofel/extra.jsonl
 .venv/bin/python data/nanofel/prepare.py
-# one GPU (v3: gc3 device 0):
+# one GPU (v3: device 0):
 CUDA_VISIBLE_DEVICES=0 nohup .venv/bin/python train.py config/finetune_nanofel.py > train.log 2>&1 &
-# two GPUs (v1/v2; v4: gc3 devices 0 and 2, device 1 was taken):
+# two GPUs (v1/v2; v4: devices 0 and 2, device 1 was taken):
 CUDA_VISIBLE_DEVICES=0,2 nohup .venv/bin/torchrun --standalone --nproc_per_node=2 train.py config/finetune_nanofel.py > train.log 2>&1 &
 # three GPUs (v5): accumulation steps must divide by the world size, so 3 -> 48 seqs / iter
 CUDA_VISIBLE_DEVICES=0,1,2 nohup .venv/bin/torchrun --standalone --nproc_per_node=3 train.py config/finetune_nanofel.py \
