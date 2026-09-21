@@ -32,7 +32,7 @@ agencies' public data).
 | `nanofel.py` | Local inference and eval. Greedy decoding, stops at `<\|endoftext\|>`, parses JSON. Eval prints exact match and a style-normalized match (same query up to clause order and parens). |
 | `data/nanofel/val.jsonl` | The 300 held-out gold records, input to `nanofel.py --eval`. |
 | `out-nanofel/ckpt.pt` | Shipped v4 weights, optimizer state stripped (gitignored, ~1.4 GB). |
-| `out-nanofel/ckpt-v3.pt`, `ckpt-v2.pt`, `ckpt-v1.pt` | v3 (new gold only), v2 (old gold + extra, ILIKE era), v1 (old gold only), kept locally for comparison. |
+| `out-nanofel/ckpt-v3.pt`, `ckpt-v2.pt`, `ckpt-v1.pt` | v3 (new gold only), v2 (old gold + extra, ILIKE era), v1 (old gold only), kept locally for comparison. v5 (longer run, no gain) stays on the GPU box in `out-nanofel-v5/`. |
 
 Training pair format is `Q: <question>\nA: <compact json><|endoftext|>`, one
 after another in a flat token stream, so nanoGPT's random-window sampler needs
@@ -51,11 +51,16 @@ uv venv --python 3.12 .venv && uv pip install -r requirements.txt   # torch cu13
 CUDA_VISIBLE_DEVICES=0 nohup .venv/bin/python train.py config/finetune_nanofel.py > train.log 2>&1 &
 # two GPUs (v1/v2; v4: gc3 devices 0 and 2, device 1 was taken):
 CUDA_VISIBLE_DEVICES=0,2 nohup .venv/bin/torchrun --standalone --nproc_per_node=2 train.py config/finetune_nanofel.py > train.log 2>&1 &
+# three GPUs (v5): accumulation steps must divide by the world size, so 3 -> 48 seqs / iter
+CUDA_VISIBLE_DEVICES=0,1,2 nohup .venv/bin/torchrun --standalone --nproc_per_node=3 train.py config/finetune_nanofel.py \
+  --out_dir=out-nanofel-v5 --gradient_accumulation_steps=3 --max_iters=6000 --lr_decay_iters=6000 > train-v5.log 2>&1 &
 ```
 
 `gradient_accumulation_steps = 2` with `batch_size = 16` gives 32 sequences
 (8,192 tokens) per iteration in both cases: nanoGPT divides the accumulation
 steps by the world size under DDP, so one process does both micro-steps.
+`train.py` asserts `gradient_accumulation_steps % world_size == 0`, hence
+the override for three GPUs.
 
 Any `{"text": ..., "meta": {...}}` JSONL works as extra data as long as the
 meta uses the same layers and columns; `normalize.py` takes care of surface
@@ -108,12 +113,13 @@ comparable.
 | v2 | old (1,000) | 17,372 (gold + extra) | 0.387 (2600) | new, 600 queries, `ILIKE`→`LIKE` on output | 322/600 = 53.7% |
 | v3 | new (3,000) | 5,400 (gold only) | 0.319 (1000) | new, 600 queries | 529/600 = 88.2% |
 | **v4 (shipped)** | new (3,000) | 18,297 (gold + extra) | 0.322 (3000) | new, 600 queries | **534/600 = 89.0%** |
+| v5 | new (3,000) | 18,297 (gold + extra) | 0.326 (1800) | new, 600 queries | 532/600 = 88.7% |
 
 All runs gpt2-medium unless noted. Val loss is token-level over question +
 answer and is not comparable across runs with different question styles;
 exact match is the metric to trust. The gpt2-large result shows v1 was
 data-limited, not capacity-limited. Style-normalized match equals exact
-match for v2, v3 and v4: no remaining miss is formatting.
+match for v2, v3, v4 and v5: no remaining miss is formatting.
 
 ### The 2026-09-20 data update (v3, v4)
 
@@ -210,6 +216,29 @@ Remaining 6 misses in v2:
 - Drops the discovery subtype when it co-occurs with a hydrocarbon-type value
   set (2 queries).
 
+### v5: longer run, same data (2026-09-21)
+
+The NorthSea `FELN.json`, `Layers.json` and OKF docs were unchanged since
+the 2026-09-20 regen (same md5, `train.bin` bit-identical to v4), so v5 only
+tests the "val loss was still falling at step 3000" lead from v4: three
+GPUs, 48 sequences (12k tokens) per iteration, 6,000 iterations, same lr
+schedule stretched to 6,000. About 100 ms/iter plus 36 s per checkpoint
+write (six saves); 14.5 minutes wall.
+
+Val loss bottomed at step 1800 (0.3258, about 86k sequences seen, v4 saw
+96k in 3000 steps) and drifted up to 0.343 by step 6000 while train loss
+kept falling, so the best-val checkpoint is the step-1800 one. It scores
+532/600 = 88.7%: 60 misses shared with v4, 6 fixed, 8 new, all in the
+existing classes (three of the eight new ones are the unnamed secondary
+layer, one a secondary-layer order swap, three a column choice
+(`included_in_discovery_name` for `discovery_name`, `field_name` for
+`field_label`), one a year off by one). Wrong-layer misses are 40 in both.
+Same data, same result: the model is at the data's ceiling, not
+under-trained. v4 stays shipped.
+
+Per-run curves (val loss at each 200-step eval) are in `train-v4.log` and
+`train-v5.log` on the GPU box; miss logs in `eval-v4.log`, `eval-v5.log`.
+
 ## To go past 89%
 
 - Layer nouns in the questions: 52 of 66 misses are a secondary layer the
@@ -220,7 +249,8 @@ Remaining 6 misses in v2:
 - Regenerate `extra.jsonl` against the new `Layers.json` (`feln-dsl`
   `gen.py` + `rephrase.py`) so the 3,099 dropped rows come back on current
   columns. Worth a point or two on the named-layer queries, not more.
-- Longer run for v4: val loss was still falling at step 3000.
+- Longer run: tried as v5 (2× steps, 1.5× batch). No gain; val loss bottoms
+  around 0.32–0.33 whatever the schedule. Do not spend more compute here.
 - `oil/condensate` (12) vs `oil/condensate shows` (15) and `oil/gas` (5) vs
   `oil/gas shows` (10) is the one remaining code confusion; a few hundred
   generated pairs contrasting them would settle it.
