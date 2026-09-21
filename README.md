@@ -239,6 +239,48 @@ under-trained. v4 stays shipped.
 Per-run curves (val loss at each 200-step eval) are in `train-v4.log` and
 `train-v5.log` on the GPU box; miss logs in `eval-v4.log`, `eval-v5.log`.
 
+Split by question style and shape, v4 → v5:
+
+| Split | v4 | v5 |
+|---|---|---|
+| `text` (casual) | 267/300 = 89.0% | 263/300 = 87.7% |
+| `source_text` (canonical) | 267/300 = 89.0% | 269/300 = 89.7% |
+| 1-layer | 90/94 = 95.7% | 92/94 = 97.9% |
+| 2-layer | 313/358 = 87.4% | 307/358 = 85.8% |
+| 3-layer | 131/148 = 88.5% | 133/148 = 89.9% |
+| all layers named in the question | 186/196 = 94.9% | 182/196 = 92.9% |
+| some layer unnamed | 348/404 = 86.1% | 350/404 = 86.6% |
+
+### Lessons from v1 to v5
+
+- The ceiling is the data, not compute. gpt2-large (v1) and 2× steps at
+  1.5× batch on three GPUs (v5) each moved exact match by two queries or
+  less. The 40 wrong-layer misses are questions that never name the
+  secondary layer; the fix is in the NorthSea subtype hints and a regen of
+  `FELN.json`, not in training.
+- Coverage beats everything else. v1 → v2 (+18 points) and v3 → v4 came from
+  adding generated pairs for the sparse patterns, and only after
+  `normalize.py` put them in gold surface style; two competing surface forms
+  would have cost exact match on gold.
+- Token val loss is not the metric. It is noisy at `eval_iters = 40`
+  (±0.005), it is not comparable across question styles, and v5 had a worse
+  val loss with better 1-layer and 3-layer accuracy. Score exact match on the
+  held-out gold; treat the style-normalized match as a formatting check
+  (it has equalled exact match since v2).
+- "Val loss still falling" at the end of a run is not a lead unless the drop
+  is well above the eval jitter. v4's last-200-step drop was 0.004; v5 showed
+  the minimum is around 90k sequences (about 5 epochs of the 18k pairs)
+  whatever the schedule, and a larger batch reaches it sooner then overfits.
+- Check the data before retraining. md5 on the source files and a diff of
+  `train.bin` took seconds and turned "retrain on the latest data" into a
+  controlled experiment; without that, v5 would have read as a data effect.
+- Split the misses before spending compute. A layer / order / subtype code /
+  column / literal breakdown of the eval log, kept per run, says whether a
+  change moved anything or just reshuffled the same 60 queries.
+- Checkpoint writes are the wall-clock tax: 36 s per 4.2 GB save on the
+  GPU box, six saves in v5. Keep `always_save_checkpoint = False` and strip
+  the optimizer before copying.
+
 ## To go past 89%
 
 - Layer nouns in the questions: 52 of 66 misses are a secondary layer the
